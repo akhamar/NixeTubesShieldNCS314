@@ -1,7 +1,9 @@
-const String FirmwareVersion = "019800";
+const String FirmwareVersion = "019900";
 const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 //Format                _X.XXX_
 //NIXIE CLOCK SHIELD NCS314 v 2.x by GRA & AFCH (fominalec@gmail.com)
+//2.00 29.06.2025
+//NTP support for ESP8266 for Hailege Mega R3 ESP8266 board
 //1.98 07.09.2023
 //Night Mode(start)
 //1.97 05.09.2023
@@ -83,6 +85,14 @@ const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 #include <OneWire.h>
 //IR remote control /////////// START /////////////////////////////
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#include <WiFiEspAT.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
+#include <time.h>
+#include <Timezone.h>
+
+// Rename wifi_ntp_secrets.h.template to wifi_ntp_secrets.h and change values
+#include "wifi_ntp_secrets.h"
 
 #define GPS_SYNC_INTERVAL 1800000 // in milliseconds
 //#define GPS_SYNC_INTERVAL 180000 //3 minutes
@@ -195,6 +205,8 @@ IRButtonState IRUpButton(IR_BUTTON_UP_CODE);
 IRButtonState IRDownButton(IR_BUTTON_DOWN_CODE);
 #endif
 
+bool initialBootDone = false;
+unsigned long previousMillis_1 = 0, previousMillis_2 = 0;
 
 int ModeButtonState = 0;
 int UpButtonState = 0;
@@ -356,13 +368,21 @@ ClickButton upButton(pinUp, LOW, CLICKBTN_PULLUP);
 ClickButton downButton(pinDown, LOW, CLICKBTN_PULLUP);
 ///////////////////
 
+// For more song
+// => http://www.fodor.sk/spectrum/rttl.htm
+// => https://1j01.github.io/rtttl.js/#007
 Tone tone1;
 #define isdigit(n) (n >= '0' && n <= '9')
 //char *song = "MissionImp:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d";
-char *song = "PinkPanther:d=4,o=5,b=160:8d#,8e,2p,8f#,8g,2p,8d#,8e,16p,8f#,8g,16p,8c6,8b,16p,8d#,8e,16p,8b,2a#,2p,16a,16g,16e,16d,2e";
+//char *song = "PinkPanther:d=4,o=5,b=160:8d#,8e,2p,8f#,8g,2p,8d#,8e,16p,8f#,8g,16p,8c6,8b,16p,8d#,8e,16p,8b,2a#,2p,16a,16g,16e,16d,2e";
 //char *song="VanessaMae:d=4,o=6,b=70:32c7,32b,16c7,32g,32p,32g,32p,32d#,32p,32d#,32p,32c,32p,32c,32p,32c7,32b,16c7,32g#,32p,32g#,32p,32f,32p,16f,32c,32p,32c,32p,32c7,32b,16c7,32g,32p,32g,32p,32d#,32p,32d#,32p,32c,32p,32c,32p,32g,32f,32d#,32d,32c,32d,32d#,32c,32d#,32f,16g,8p,16d7,32c7,32d7,32a#,32d7,32a,32d7,32g,32d7,32d7,32p,32d7,32p,32d7,32p,16d7,32c7,32d7,32a#,32d7,32a,32d7,32g,32d7,32d7,32p,32d7,32p,32d7,32p,32g,32f,32d#,32d,32c,32d,32d#,32c,32d#,32f,16c";
 //char *song="DasBoot:d=4,o=5,b=100:d#.4,8d4,8c4,8d4,8d#4,8g4,a#.4,8a4,8g4,8a4,8a#4,8d,2f.,p,f.4,8e4,8d4,8e4,8f4,8a4,c.,8b4,8a4,8b4,8c,8e,2g.,2p";
 //char *song="Scatman:d=4,o=5,b=200:8b,16b,32p,8b,16b,32p,8b,2d6,16p,16c#.6,16p.,8d6,16p,16c#6,8b,16p,8f#,2p.,16c#6,8p,16d.6,16p.,16c#6,16b,8p,8f#,2p,32p,2d6,16p,16c#6,8p,16d.6,16p.,16c#6,16a.,16p.,8e,2p.,16c#6,8p,16d.6,16p.,16c#6,16b,8p,8b,16b,32p,8b,16b,32p,8b,2d6,16p,16c#.6,16p.,8d6,16p,16c#6,8b,16p,8f#,2p.,16c#6,8p,16d.6,16p.,16c#6,16b,8p,8f#,2p,32p,2d6,16p,16c#6,8p,16d.6,16p.,16c#6,16a.,16p.,8e,2p.,16c#6,8p,16d.6,16p.,16c#6,16a,8p,8e,2p,32p,16f#.6,16p.,16b.,16p.";
+char *song="FinalCountdown:d=4,o=5,b=125:p,8p,16b,16a,b,e,p,8p,16c6,16b,8c6,8b,a,p,8p,16c6,16b,c6,e,p,8p,16a,16g,8a,8g,8f#,8a,g.,16f#,16g,a.,16g,16a,8b,8a,8g,8f#,e,c6,2b.,16b,16c6,16b,16a,1b";
+//char *song="Indiana:d=4,o=5,b=250:e,8p,8f,8g,8p,1c6,8p.,d,8p,8e,1f,p.,g,8p,8a,8b,8p,1f6,p,a,8p,8b,2c6,2d6,2e6,e,8p,8f,8g,8p,1c6,p,d6,8p,8e6,1f.6,g,8p,8g,e.6,8p,d6,8p,8g,e.6,8p,d6,8p,8g,f.6,8p,e6,8p,8d6,2c6";
+//char *song="Metallica:d=4,o=6,b=125:e5,g,b,e7,b,g,e5,g,b,e7,b,g,2e5,b,2b,2b,32p,b,c,b,a,b,a,e,2e,2e,16p,c,e,e,f_,e,e,16p,e,f_,2g,g,g,2a,a,a,2e,2g,2b,2e7,2b,2g,2e";
+//char *song="MetallicaEnterSandman:d=4,o=6,b=125:a5,8a,8c7,8d_,d,8a,a5,8a,8c7,8d_,d,8a,a5,8a,8c7,8d_,d,8a,a5,8a,8c7,8d_,d,8a,a5";
+//char *song="AdamsFamily:o=5,d=8,b=160,b=160:c,4f,a,4f,c,4b4,2g,f,4e,g,4e,g4,4c,2f,c,4f,a,4f,c,4b4,2g,f,4e,c,4d,e,1f,c,d,e,f,1p,d,e,f#,g,1p,d,e,f#,g,4p,d,e,f#,g,4p,c,d,e,f";
 //char *song="Popcorn:d=4,o=5,b=160:8c6,8a#,8c6,8g,8d#,8g,c,8c6,8a#,8c6,8g,8d#,8g,c,8c6,8d6,8d#6,16c6,8d#6,16c6,8d#6,8d6,16a#,8d6,16a#,8d6,8c6,8a#,8g,8a#,c6";
 //char *song="WeWishYou:d=4,o=5,b=200:d,g,8g,8a,8g,8f#,e,e,e,a,8a,8b,8a,8g,f#,d,d,b,8b,8c6,8b,8a,g,e,d,e,a,f#,2g,d,g,8g,8a,8g,8f#,e,e,e,a,8a,8b,8a,8g,f#,d,d,b,8b,8c6,8b,8a,g,e,d,e,a,f#,1g,d,g,g,g,2f#,f#,g,f#,e,2d,a,b,8a,8a,8g,8g,d6,d,d,e,a,f#,2g";
 #define OCTAVE_OFFSET 0
@@ -401,6 +421,28 @@ long modesChangePeriod = timeModePeriod;
 
 extern const int LEDsDelay;
 
+/*  Wireless settings
+ *
+*/
+
+char ssid[] = SECRET_SSID;
+char pass[] = SECRET_PASS;
+
+WiFiUDP ntpUDP;
+WiFiServer server(80);  // Set web server port
+
+// You can specify the time server pool and the offset (in seconds, can be changed later with setTimeOffset()).
+//Additionally you can specify the update interval (in milliseconds, can be changed using setUpdateInterval()).
+NTPClient timeClient(ntpUDP, NTPSERVER);
+unsigned long epoch = 0;
+String tempRTCTime = "", tempCLKTime = "", tempNTPTime = "";
+TimeChangeRule DST = TZ_DST;
+TimeChangeRule DEF = TZ_DEF;
+Timezone myTZ(DST, DEF);
+TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
+String DSTEnabled = "Unknown";
+int wifiSetupLoop = 0;
+
 /*******************************************************************************************************
   Init Programm
 *******************************************************************************************************/
@@ -413,6 +455,8 @@ void setup()
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
   Serial1.begin(9600);
   digitalWrite(19, HIGH);
+  WiFiSetup();
+  server.begin();
 #endif
 
   if (EEPROM.read(HourFormatEEPROMAddress) != 12) value[hModeValueIndex] = 24; else value[hModeValueIndex] = 12;
@@ -526,6 +570,96 @@ unsigned long prevTime4FireWorks = 0; //time of last RGB changed
 ***************************************************************************************************************/
 void loop() 
 {
+
+  // Wifi client
+  WiFiClient client = server.available();
+  if(client)
+  {
+    IPAddress ip = client.remoteIP();
+    Serial.println("New client ");
+    Serial.println(ip);
+    
+    while(client.connected())
+    {
+      if (client.available())
+      {
+        String line = client.readStringUntil('\n');
+        line.trim();
+        Serial.println(line);
+
+        if (line.length() == 0)
+        {
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/html");
+          client.println("Connection: close");
+          client.println("");
+          
+          String html = "";
+
+          html += "<!DOCTYPE html>";
+          html += "<html lang='en'>";
+
+            html += "<head>";
+              html += "<meta charset='utf-8'>";
+              html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+              html += "<title>Nixie Clock</title>";
+              html += "<style>";
+                html += "table {font-family: arial, sans-serif; border-collapse: collapse; width: 100%;}";
+                html += "td, th {border: 1px solid #dddddd; text-align: left; padding: 10px;}";
+                html += "tr:nth-child(even) {background-color: #dddddd;}";
+              html += "</style>";
+            html += "</head>";
+
+            html += "<body>";
+
+              html += "<h1 style='text-align: center;'>Current Time Readings</h1>";
+              html += "<table>";
+                html += "<tr>";
+                  html += "<th>Fetched UNIX Time</th>";
+                  html += "<th><a target='_blank' href='https://www.epochconverter.com/?q=" + String(epoch) + "'>" + String(epoch) + "</a></th>";
+                html += "</tr>";
+
+                html += "<tr>";
+                  html += "<th>Fetched NTP Time (UTC)</th>";
+                  html += "<th>" + String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds()) + "</th>";
+                html += "</tr>";
+
+                html += "<tr>";
+                  html += "<th>Current Nixie Time (TZ)</th>";
+                  html += "<th>" + String(hour()) + ":" + String(minute()) + ":" + String(second()) + "</th>";
+                html += "</tr>";
+
+                html += "<tr>";
+                  html += "<th>Stored RTC Time (TZ)</th>";
+                  html += "<th>" + String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds) + "</th>";
+                html += "</tr>";
+                
+                html += "<tr>";
+                  html += "<th>Hours Offset Index</th>";
+                  html += "<th>" + String(HoursOffsetIndex[value]) + "</th>";
+                html += "</tr>";
+
+                html += "<tr>";
+                  html += "<th>Daylight Saving Time (DST) Enabled?</th>";
+                  html += "<th>" + String(DSTEnabled) + "</th>";
+                html += "</tr>";
+
+              html += "</table>";
+
+              html += "<p style='text-align: center;'>Firmware = " + String(FirmwareVersion.substring(1, 2)) + "." + String(FirmwareVersion.substring(2, 5)) + "</p>";
+
+            html += "</body>";
+          html += "</html>";
+
+          client.println(html);
+          client.flush();
+          break;
+        }
+      }
+    }
+    client.stop();
+  }
+
   CheckNightMode();
   if (((millis() % 10000) == 0) && (RTC_present)) //synchronize with RTC every 10 seconds
   {
@@ -535,6 +669,42 @@ void loop()
   }
 
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+
+  // Update NTP upon boot
+  if (!initialBootDone)
+  {
+    initialBootDone = true;
+    
+    Serial.println(F("\n"));
+    Serial.println(F("Attempting to sync with NTP after boot"));
+
+    //timeClient.update();
+    timeClient.forceUpdate();
+    
+    if(timeClient.isTimeSet())
+    {
+      setNTPTime();
+      Serial.println(F("NTP updated after boot"));
+    }    
+  }
+
+  //synchronize with NTP every 1.5 minutes (90UL * 1000UL)
+  else if ((millis() - previousMillis_2) >= (90UL * 1000UL))
+  {
+    // Reset previousMillis to current millis
+    previousMillis_2 = millis();
+
+    Serial.println(F("\n"));
+    Serial.println(F("Attempting to sync with NTP"));
+
+    timeClient.forceUpdate();
+
+    if(timeClient.isTimeSet())
+    {
+      setNTPTime();
+      Serial.println(F("NTP updated"));
+    }
+  }
 
   MillsNow = millis();
   if ((MillsNow - Last_Time_GPS_Sync) > GPS_Sync_Interval)
@@ -944,6 +1114,8 @@ void doTest()
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
   if (Serial1.available() > 10) Serial.println(F("GPS detected"));
   else Serial.println(F("GPS NOT detected!"));
+  if (Serial3.available() > 10) Serial.println(F("WIFI module detected"));
+  else Serial.println(F("WiFi module NOT detected!"));
 #endif
 #ifdef tubes8
   String testStringArray[11] = {"00000000", "11111111", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888", "99999999", ""};
@@ -1752,6 +1924,89 @@ boolean inRange( int no, int low, int high )
     return false;
   }
   return true;
+}
+
+void WiFiSetup()
+{
+  Serial3.begin(115200);
+  WiFi.init(&Serial3);    // initialize ESP module
+    
+  Serial.println(F("\n"));
+  Serial.println((String)"Connecting to = " + ssid);
+  
+  WiFi.begin(ssid, pass);
+  
+  // Set up Wifi connection
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+    wifiSetupLoop++;
+    if (wifiSetupLoop == 30) break;
+    if (Serial3.available() <= 10) {
+      Serial.println(F("WiFi module NOT detected!"));
+      break;
+    }
+  }
+
+  // Wifi is connected
+  if(WiFi.status() == WL_CONNECTED)
+  {  
+    Serial.println(F("\n"));
+
+    IPAddress ip = WiFi.localIP();
+    Serial.print(F("IP Address: "));
+    Serial.println(ip);
+  
+    Serial.println((String)"Signal strength (RSSI) = " + WiFi.RSSI() + " dBm");
+    Serial.println((String)"ESP8266 Firmware = " + WiFi.firmwareVersion());
+    Serial.println(F("\n"));
+  }
+}
+
+// NTP stuff here
+void setNTPTime()
+{
+  // fetch NTP time in Unix time (epoch timestamp)
+  epoch = timeClient.getEpochTime();
+
+  // Show fetched NTP time
+  Serial.println("UNIX epoch time = " + String(epoch));
+  Serial.println("Formatted time = " + String(timeClient.getFormattedTime()));
+  // Set the clock to the fetched NTP time + time offset in Unix time (epoch timestamp)
+  //setTime(epoch);
+  
+  // Update time according to timezone
+  myTZ.setRules(DST, DEF);
+  setTime(myTZ.toLocal(epoch, &tcr));
+
+  if(myTZ.locIsDST(epoch))
+  {
+    DSTEnabled = "Yes";
+  }
+  else
+  {
+    DSTEnabled = "No";
+  }
+  
+  // Logic to compare RTC/NTP/CLK drift and update if needed, prevents excessive RTC writes
+  tempRTCTime = String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds);
+  tempNTPTime = String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds());
+  tempCLKTime = String(hour()) + ":" + String(minute()) + ":" + String(second());
+
+  Serial.println("Current RTC time = " + tempRTCTime);
+  Serial.println("Current NTP time = " + tempNTPTime);
+  Serial.println("Fetched CLK time = " + tempCLKTime);
+
+  if(RTC_hours == hour() && RTC_minutes == minute() && RTC_seconds == second())
+  {
+    Serial.println(F("Time not synced with RTC, since RTC and current time (CLK) are the same"));
+  }
+  else
+  {
+    setRTCDateTime(hour(), minute(), second(), day(), month(), year() % 1000, weekday());
+    Serial.println(F("Updated current RTC time to current clock time"));
+  }
 }
 
 #endif
