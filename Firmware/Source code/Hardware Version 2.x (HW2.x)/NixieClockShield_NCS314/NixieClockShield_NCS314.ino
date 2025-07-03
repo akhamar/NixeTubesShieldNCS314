@@ -314,11 +314,12 @@ char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 
 WiFiEspUDP ntpUDP;
-WiFiEspServer server(80);  // Set web server port
+//WiFiEspServer server(80);  // Set web server port
 
 // You can specify the time server pool and the offset (in seconds, can be changed later with setTimeOffset()).
 //Additionally you can specify the update interval (in milliseconds, can be changed using setUpdateInterval()).
 NTPClient timeClient(ntpUDP, NTPSERVER);
+bool timeClientUpdate = false;
 unsigned long epoch = 0;
 String tempRTCTime = "", tempCLKTime = "", tempNTPTime = "";
 TimeChangeRule DST = TZ_DST;
@@ -340,7 +341,7 @@ void setup()
   Serial1.begin(9600);
   digitalWrite(19, HIGH);
   WiFiSetup();
-  server.begin();
+  //server.begin();
 #endif
 
   if (EEPROM.read(HourFormatEEPROMAddress) != 12) value[hModeValueIndex] = 24; else value[hModeValueIndex] = 12;
@@ -455,94 +456,94 @@ unsigned long prevTime4FireWorks = 0; //time of last RGB changed
 void loop() 
 {
 
-  // Wifi client
-  WiFiEspClient client = server.available();
-  if(client)
-  {
-    IPAddress ip = client.remoteIP();
-    Serial.println("New client ");
-    Serial.println(ip);
+  // // Wifi client
+  // WiFiEspClient client = server.available();
+  // if(client)
+  // {
+  //   IPAddress ip = client.remoteIP();
+  //   Serial.println("New client ");
+  //   Serial.println(ip);
     
-    while(client.connected())
-    {
-      if (client.available())
-      {
-        String line = client.readStringUntil('\n');
-        line.trim();
-        Serial.println(line);
+  //   while(client.connected())
+  //   {
+  //     if (client.available())
+  //     {
+  //       String line = client.readStringUntil('\n');
+  //       line.trim();
+  //       Serial.println(line);
 
-        if (line.length() == 0)
-        {
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: text/html");
-          client.println("Connection: close");
-          client.println("");
+  //       if (line.length() == 0)
+  //       {
+  //         client.println("HTTP/1.1 200 OK");
+  //         client.println("Content-Type: text/html");
+  //         client.println("Connection: close");
+  //         client.println("");
           
-          String html = "";
+  //         String html = "";
 
-          html += "<!DOCTYPE html>";
-          html += "<html lang='en'>";
+  //         html += "<!DOCTYPE html>";
+  //         html += "<html lang='en'>";
 
-            html += "<head>";
-              html += "<meta charset='utf-8'>";
-              html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-              html += "<title>Nixie Clock</title>";
-              html += "<style>";
-                html += "table {font-family: arial, sans-serif; border-collapse: collapse; width: 100%;}";
-                html += "td, th {border: 1px solid #dddddd; text-align: left; padding: 10px;}";
-                html += "tr:nth-child(even) {background-color: #dddddd;}";
-              html += "</style>";
-            html += "</head>";
+  //           html += "<head>";
+  //             html += "<meta charset='utf-8'>";
+  //             html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+  //             html += "<title>Nixie Clock</title>";
+  //             html += "<style>";
+  //               html += "table {font-family: arial, sans-serif; border-collapse: collapse; width: 100%;}";
+  //               html += "td, th {border: 1px solid #dddddd; text-align: left; padding: 10px;}";
+  //               html += "tr:nth-child(even) {background-color: #dddddd;}";
+  //             html += "</style>";
+  //           html += "</head>";
 
-            html += "<body>";
+  //           html += "<body>";
 
-              html += "<h1 style='text-align: center;'>Current Time Readings</h1>";
-              html += "<table>";
-                html += "<tr>";
-                  html += "<th>Fetched UNIX Time</th>";
-                  html += "<th><a target='_blank' href='https://www.epochconverter.com/?q=" + String(epoch) + "'>" + String(epoch) + "</a></th>";
-                html += "</tr>";
+  //             html += "<h1 style='text-align: center;'>Current Time Readings</h1>";
+  //             html += "<table>";
+  //               html += "<tr>";
+  //                 html += "<th>Fetched UNIX Time</th>";
+  //                 html += "<th><a target='_blank' href='https://www.epochconverter.com/?q=" + String(epoch) + "'>" + String(epoch) + "</a></th>";
+  //               html += "</tr>";
 
-                html += "<tr>";
-                  html += "<th>Fetched NTP Time (UTC)</th>";
-                  html += "<th>" + String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds()) + "</th>";
-                html += "</tr>";
+  //               html += "<tr>";
+  //                 html += "<th>Fetched NTP Time (UTC)</th>";
+  //                 html += "<th>" + String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds()) + "</th>";
+  //               html += "</tr>";
 
-                html += "<tr>";
-                  html += "<th>Current Nixie Time (TZ)</th>";
-                  html += "<th>" + String(hour()) + ":" + String(minute()) + ":" + String(second()) + "</th>";
-                html += "</tr>";
+  //               html += "<tr>";
+  //                 html += "<th>Current Nixie Time (TZ)</th>";
+  //                 html += "<th>" + String(hour()) + ":" + String(minute()) + ":" + String(second()) + "</th>";
+  //               html += "</tr>";
 
-                html += "<tr>";
-                  html += "<th>Stored RTC Time (TZ)</th>";
-                  html += "<th>" + String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds) + "</th>";
-                html += "</tr>";
+  //               html += "<tr>";
+  //                 html += "<th>Stored RTC Time (TZ)</th>";
+  //                 html += "<th>" + String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds) + "</th>";
+  //               html += "</tr>";
                 
-                html += "<tr>";
-                  html += "<th>Hours Offset Index</th>";
-                  html += "<th>" + String(HoursOffsetIndex[value]) + "</th>";
-                html += "</tr>";
+  //               html += "<tr>";
+  //                 html += "<th>Hours Offset Index</th>";
+  //                 html += "<th>" + String(HoursOffsetIndex[value]) + "</th>";
+  //               html += "</tr>";
 
-                html += "<tr>";
-                  html += "<th>Daylight Saving Time (DST) Enabled?</th>";
-                  html += "<th>" + String(DSTEnabled) + "</th>";
-                html += "</tr>";
+  //               html += "<tr>";
+  //                 html += "<th>Daylight Saving Time (DST) Enabled?</th>";
+  //                 html += "<th>" + String(DSTEnabled) + "</th>";
+  //               html += "</tr>";
 
-              html += "</table>";
+  //             html += "</table>";
 
-              html += "<p style='text-align: center;'>Firmware = " + String(FirmwareVersion.substring(1, 2)) + "." + String(FirmwareVersion.substring(2, 5)) + "</p>";
+  //             html += "<p style='text-align: center;'>Firmware = " + String(FirmwareVersion.substring(1, 2)) + "." + String(FirmwareVersion.substring(2, 5)) + "</p>";
 
-            html += "</body>";
-          html += "</html>";
+  //           html += "</body>";
+  //         html += "</html>";
 
-          client.println(html);
-          client.flush();
-          break;
-        }
-      }
-    }
-    client.stop();
-  }
+  //         client.println(html);
+  //         client.flush();
+  //         break;
+  //       }
+  //     }
+  //   }
+  //   client.stop();
+  // }
 
   CheckNightMode();
   if (((millis() % 10000) == 0) && (RTC_present)) //synchronize with RTC every 10 seconds
@@ -562,18 +563,21 @@ void loop()
     Serial.println(F("\n"));
     Serial.println(F("Attempting to sync with NTP after boot"));
 
-    //timeClient.update();
-    timeClient.forceUpdate();
+    //timeClient.forceUpdate();
+    timeClientUpdate = timeClient.update();
+    Serial.println((String)"Update: " + timeClientUpdate);
     
-    if(timeClient.isTimeSet())
-    {
+    if(timeClient.isTimeSet() && timeClientUpdate) {
       setNTPTime();
       Serial.println(F("NTP updated after boot"));
-    }    
+    }
+    else {
+      Serial.println(F("No NTP update after boot"));
+    }
   }
 
-  //synchronize with NTP every 1.5 minutes (90UL * 1000UL)
-  else if ((millis() - previousMillis_2) >= (90UL * 1000UL))
+  //synchronize with NTP every 5 minutes (300UL * 1000UL)
+  else if ((millis() - previousMillis_2) >= (300UL * 1000UL))
   {
     // Reset previousMillis to current millis
     previousMillis_2 = millis();
@@ -581,12 +585,16 @@ void loop()
     Serial.println(F("\n"));
     Serial.println(F("Attempting to sync with NTP"));
 
-    timeClient.forceUpdate();
+    //timeClient.forceUpdate();
+    timeClientUpdate = timeClient.update();
+    Serial.println((String)"Update: " + timeClientUpdate);
 
-    if(timeClient.isTimeSet())
-    {
+    if(timeClient.isTimeSet() && timeClientUpdate) {
       setNTPTime();
       Serial.println(F("NTP updated"));
+    }
+    else {
+      Serial.println(F("No NTP update"));
     }
   }
 #else
@@ -1639,48 +1647,54 @@ void WiFiSetup()
 }
 
 // NTP stuff here
-void setNTPTime()
-{
+void setNTPTime() {
+
   // fetch NTP time in Unix time (epoch timestamp)
+  // Filter bad range => example: 2085978497, 2085978527, 2085978525, 2085978497, ...
   epoch = timeClient.getEpochTime();
 
-  // Show fetched NTP time
-  Serial.println("UNIX epoch time = " + String(epoch));
-  Serial.println("Formatted time = " + String(timeClient.getFormattedTime()));
-  // Set the clock to the fetched NTP time + time offset in Unix time (epoch timestamp)
-  //setTime(epoch);
-  
-  // Update time according to timezone
-  myTZ.setRules(DST, DEF);
-  setTime(myTZ.toLocal(epoch, &tcr));
+  // Testing if epoch is a correct value
+  if ((epoch < 2085978000) || (epoch > 2085979000)) {
 
-  if(myTZ.locIsDST(epoch))
-  {
-    DSTEnabled = "Yes";
-  }
-  else
-  {
-    DSTEnabled = "No";
-  }
-  
-  // Logic to compare RTC/NTP/CLK drift and update if needed, prevents excessive RTC writes
-  tempRTCTime = String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds);
-  tempNTPTime = String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds());
-  tempCLKTime = String(hour()) + ":" + String(minute()) + ":" + String(second());
+    // Show fetched NTP time
+    Serial.println("UNIX epoch time = " + String(epoch));
+    Serial.println("Formatted time = " + String(timeClient.getFormattedTime()));
+    // Set the clock to the fetched NTP time + time offset in Unix time (epoch timestamp)
+    //setTime(epoch);
+    
+    // Update time according to timezone
+    myTZ.setRules(DST, DEF);
+    setTime(myTZ.toLocal(epoch, &tcr));
 
-  Serial.println("Current RTC time = " + tempRTCTime);
-  Serial.println("Current NTP time = " + tempNTPTime);
-  Serial.println("Fetched CLK time = " + tempCLKTime);
+    if(myTZ.locIsDST(epoch)) {
+      DSTEnabled = "Yes";
+    }
+    else {
+      DSTEnabled = "No";
+    }
+    
+    // Logic to compare RTC/NTP/CLK drift and update if needed, prevents excessive RTC writes
+    tempRTCTime = String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds);
+    tempNTPTime = String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds());
+    tempCLKTime = String(hour()) + ":" + String(minute()) + ":" + String(second());
 
-  if(RTC_hours == hour() && RTC_minutes == minute() && RTC_seconds == second())
-  {
-    Serial.println(F("Time not synced with RTC, since RTC and current time (CLK) are the same"));
+    Serial.println("Current RTC time = " + tempRTCTime);
+    Serial.println("Current NTP time = " + tempNTPTime);
+    Serial.println("Fetched CLK time = " + tempCLKTime);
+
+    if(RTC_hours == hour() && RTC_minutes == minute() && RTC_seconds == second()) {
+      Serial.println(F("Time not synced with RTC, since RTC and current time (CLK) are the same"));
+    }
+    else {
+      setRTCDateTime(hour(), minute(), second(), day(), month(), year() % 1000, weekday());
+      Serial.println(F("Updated current RTC time to current clock time"));
+    }
+
   }
-  else
-  {
-    setRTCDateTime(hour(), minute(), second(), day(), month(), year() % 1000, weekday());
-    Serial.println(F("Updated current RTC time to current clock time"));
+  else {
+     Serial.println("Ignoring epoch time = " + String(epoch));
   }
+
 }
 
 #endif
