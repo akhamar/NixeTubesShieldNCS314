@@ -85,8 +85,10 @@ const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 #include <OneWire.h>
 //IR remote control /////////// START /////////////////////////////
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-#include <WiFiEspAT.h>
-#include <WiFiUdp.h>
+//#include <WiFiEspAT.h>
+#include <WiFiEsp.h>
+#include <WiFiEspUdp.h>
+//#include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <time.h>
 #include <Timezone.h>
@@ -428,8 +430,8 @@ extern const int LEDsDelay;
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 
-WiFiUDP ntpUDP;
-WiFiServer server(80);  // Set web server port
+WiFiEspUDP ntpUDP;
+WiFiEspServer server(80);  // Set web server port
 
 // You can specify the time server pool and the offset (in seconds, can be changed later with setTimeOffset()).
 //Additionally you can specify the update interval (in milliseconds, can be changed using setUpdateInterval()).
@@ -441,7 +443,6 @@ TimeChangeRule DEF = TZ_DEF;
 Timezone myTZ(DST, DEF);
 TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
 String DSTEnabled = "Unknown";
-int wifiSetupLoop = 0;
 
 /*******************************************************************************************************
   Init Programm
@@ -572,7 +573,7 @@ void loop()
 {
 
   // Wifi client
-  WiFiClient client = server.available();
+  WiFiEspClient client = server.available();
   if(client)
   {
     IPAddress ip = client.remoteIP();
@@ -1941,12 +1942,16 @@ void WiFiSetup()
   {
     delay(500);
     Serial.print(".");
-    wifiSetupLoop++;
-    if (wifiSetupLoop == 30) break;
-    if (Serial3.available() <= 10) {
-      Serial.println(F("WiFi module NOT detected!"));
-      break;
-    }
+    // wifiSetupLoop++;
+    // // If more than 30 loop, break
+    // if (wifiSetupLoop == 30) break;
+    // // If higher than 10 loop then check for serial (allow temp for serial3 to be up and test it)
+    // if (wifiSetupLoop > 10) {
+    //   if (Serial3.available() <= 10) {
+    //     Serial.println(F("WiFi module NOT detected!"));
+    //     break;
+    //   }
+    // }
   }
 
   // Wifi is connected
