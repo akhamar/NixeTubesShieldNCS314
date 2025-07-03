@@ -83,12 +83,8 @@ const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 #include <EEPROM.h>
 #include "doIndication314_HW2.x.h"
 #include <OneWire.h>
-//IR remote control /////////// START /////////////////////////////
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-//#include <WiFiEspAT.h>
 #include <WiFiEsp.h>
 #include <WiFiEspUdp.h>
-//#include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <time.h>
 #include <Timezone.h>
@@ -96,125 +92,12 @@ const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 // Rename wifi_ntp_secrets.h.template to wifi_ntp_secrets.h and change values
 #include "wifi_ntp_secrets.h"
 
-#define GPS_SYNC_INTERVAL 1800000 // in milliseconds
-//#define GPS_SYNC_INTERVAL 180000 //3 minutes
-unsigned long Last_Time_GPS_Sync = 0;
-//bool GPS_Sync_Flag = false;
-//uint32_t GPS_Sync_Interval=120000; // 2 minutes
-uint32_t GPS_Sync_Interval = 60000; // first try = 1 minute
-uint32_t MillsNow = 0;
-#define TIME_TO_TRY 60000 //1 minute
-bool AttMsgWasShowed = false;
-
-#define GPS_BUFFER_LENGTH 83
-
-char GPS_Package[GPS_BUFFER_LENGTH];
-byte GPS_position = 0;
-
-struct GPS_DATE_TIME
-{
-  byte GPS_hours;
-  byte GPS_minutes;
-  byte GPS_seconds;
-  byte GPS_day;
-  byte GPS_mounth;
-  int GPS_year;
-  bool GPS_Valid_Data = false;
-  unsigned long GPS_Data_Parsed_time;
-};
-
-GPS_DATE_TIME GPS_Date_Time;
-
-#include <IRremote.h>
-int RECV_PIN = 4;
-IRrecv irrecv(RECV_PIN);
-decode_results IRresults;
-// buttons codes for remote controller Sony RM-X151
-#define IR_BUTTON_UP_CODE 0x6621
-#define IR_BUTTON_DOWN_CODE 0x2621
-#define IR_BUTTON_MODE_CODE 0x7121
-
-class IRButtonState
-{
-  public:
-    int PAUSE_BETWEEN_PACKETS = 50;
-    int PACKETS_QTY_IN_LONG_PRESS = 18;
-
-  private:
-    bool Flag = 0;
-    byte CNT_packets = 0;
-    unsigned long lastPacketTime = 0;
-    bool START_TIMER = false;
-    int _buttonCode;
-
-  public: IRButtonState::IRButtonState(int buttonCode)
-    {
-      _buttonCode = buttonCode;
-    }
-
-  public: int IRButtonState::checkButtonState(int receivedCode)
-    {
-      if (((millis() - lastPacketTime) > PAUSE_BETWEEN_PACKETS) && (START_TIMER == true))
-      {
-        START_TIMER = false;
-        if (CNT_packets >= 2) {
-          Flag = 0;
-          CNT_packets = 0;
-          START_TIMER = false;
-          return 1;
-        }
-        else {
-          Flag = 0;
-          CNT_packets = 0;
-          return 0;
-        }
-      }
-      else
-      {
-        if (receivedCode == _buttonCode) {
-          Flag = 1;
-        }
-        else
-        {
-          if (!(Flag == 1)) {
-            return 0;
-          }
-          else
-          {
-            if (!(receivedCode == 0xFFFFFFFF)) {
-              return 0;
-            }
-          }
-        }
-        CNT_packets++;
-        lastPacketTime = millis();
-        START_TIMER = true;
-        if (CNT_packets >= PACKETS_QTY_IN_LONG_PRESS) {
-          Flag = 0;
-          CNT_packets = 0;
-          START_TIMER = false;
-          return -1;
-        }
-        else {
-          return 0;
-        }
-      }
-    }
-};
-
-IRButtonState IRModeButton(IR_BUTTON_MODE_CODE);
-IRButtonState IRUpButton(IR_BUTTON_UP_CODE);
-IRButtonState IRDownButton(IR_BUTTON_DOWN_CODE);
-#endif
-
 bool initialBootDone = false;
 unsigned long previousMillis_1 = 0, previousMillis_2 = 0;
 
 int ModeButtonState = 0;
 int UpButtonState = 0;
 int DownButtonState = 0;
-
-//IR remote control /////////// START /////////////////////////////
 
 boolean UD, LD; // DOTS control;
 
@@ -551,8 +434,8 @@ void setup()
   setTime(RTC_hours, RTC_minutes, RTC_seconds, RTC_day, RTC_month, RTC_year);
 
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-  irrecv.blink13(false);
-  irrecv.enableIRIn(); // Start the receiver
+  timeClient.begin();
+  timeClient.setTimeOffset(HoursOffsetIndex[value] * 3600);
 #endif
 
 }
@@ -706,47 +589,6 @@ void loop()
       Serial.println(F("NTP updated"));
     }
   }
-
-  MillsNow = millis();
-  if ((MillsNow - Last_Time_GPS_Sync) > GPS_Sync_Interval)
-  {
-    //GPS_Sync_Interval = GPS_SYNC_INTERVAL; // <----!
-    //GPS_Sync_Flag = 0;
-    if (AttMsgWasShowed == false)
-    {
-      Serial.println(F("Attempt to sync with GPS."));
-      AttMsgWasShowed = true;
-    }
-    GetDataFromSerial1();
-    //SyncWithGPS();
-  }
-  if ((MillsNow - Last_Time_GPS_Sync) > GPS_Sync_Interval + TIME_TO_TRY)
-  {
-    Last_Time_GPS_Sync = MillsNow; //if it is not possible to synchronize within the allotted time TIME_TO_TRY, then we postpone attempts to the next time interval.
-    //GPS_Sync_Flag = 1;
-    //GPS_Sync_Interval = GPS_SYNC_INTERVAL;
-    Serial.println(F("All attempts were unsuccessful."));
-    AttMsgWasShowed = false;
-  }
-  //if (GPS_Sync_Flag == 0) GetDataFromSerial1(); //GPSCheckValidity();
-
-  IRresults.value = 0;
-  if (irrecv.decode(&IRresults)) {
-    Serial.println(IRresults.value, HEX);
-    irrecv.resume(); // Receive the next value
-  }
-
-  ModeButtonState = IRModeButton.checkButtonState(IRresults.value);
-  if (ModeButtonState == 1) Serial.println("Mode short");
-  if (ModeButtonState == -1) Serial.println("Mode long....");
-
-  UpButtonState = IRUpButton.checkButtonState(IRresults.value);
-  if (UpButtonState == 1) Serial.println("Up short");
-  if (UpButtonState == -1) Serial.println("Up long....");
-
-  DownButtonState = IRDownButton.checkButtonState(IRresults.value);
-  if (DownButtonState == 1) Serial.println("Down short");
-  if (DownButtonState == -1) Serial.println("Down long....");
 #else
   ModeButtonState = 0;
   UpButtonState = 0;
@@ -1115,8 +957,8 @@ void doTest()
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
   if (Serial1.available() > 10) Serial.println(F("GPS detected"));
   else Serial.println(F("GPS NOT detected!"));
-  if (Serial3.available() > 10) Serial.println(F("WIFI module detected"));
-  else Serial.println(F("WiFi module NOT detected!"));
+  // if (Serial3.available() > 10) Serial.println(F("WIFI module detected"));
+  // else Serial.println(F("WiFi module NOT detected!"));
 #endif
 #ifdef tubes8
   String testStringArray[11] = {"00000000", "11111111", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888", "99999999", ""};
@@ -1169,8 +1011,14 @@ void doDotBlink()
 {
   //dotPattern = B11000000; return; //always on
   //dotPattern = B00000000; return; //always off
-  if (second() % 2 == 0) dotPattern = B11000000;
-  else dotPattern = B00000000;
+  //if (second() % 2 == 0) dotPattern = B11000000;
+  //else dotPattern = B00000000;
+  if (millis() % 1000 < 200) dotPattern = B11000000;
+  else {
+    if (millis() % 1000 < 400) dotPattern = B01000000;
+    else dotPattern = B00000000;
+  }
+    
 }
 
 void setRTCDateTime(byte h, byte m, byte s, byte d, byte mon, byte y, byte w)
@@ -1747,185 +1595,6 @@ void ExitFromNightMode()
 }
 
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-
-void SyncWithGPS()
-{
-  if ((millis() - GPS_Date_Time.GPS_Data_Parsed_time) > 3000) {
-    //Serial.println(F("Parsed data to old"));
-    return;
-  }
-  Serial.println(F("Updating time from GPS..."));
-  Serial.println(GPS_Date_Time.GPS_hours);
-  Serial.println(GPS_Date_Time.GPS_minutes);
-  Serial.println(GPS_Date_Time.GPS_seconds);
-
-  setTime(GPS_Date_Time.GPS_hours, GPS_Date_Time.GPS_minutes, GPS_Date_Time.GPS_seconds, GPS_Date_Time.GPS_day, GPS_Date_Time.GPS_mounth, GPS_Date_Time.GPS_year % 1000);
-  adjustTime((long)value[HoursOffsetIndex] * 3600);
-  setRTCDateTime(hour(), minute(), second(), day(), month(), year() % 1000, 1);
-  Last_Time_GPS_Sync = MillsNow;
-  GPS_Sync_Interval = GPS_SYNC_INTERVAL;
-  AttMsgWasShowed = false;
-}
-
-void GetDataFromSerial1()
-{
-  if (Serial1.available()) {     // If anything comes in Serial1 (pins 0 & 1)
-    byte GPS_incoming_byte;
-    GPS_incoming_byte = Serial1.read();
-    //Serial.write(GPS_incoming_byte);
-    GPS_Package[GPS_position] = GPS_incoming_byte;
-    GPS_position++;
-    if (GPS_position == GPS_BUFFER_LENGTH - 1)
-    {
-      GPS_position = 0;
-      // Serial.println("more then BUFFER_LENGTH!!!!");
-    }
-    if (GPS_incoming_byte == 0x0A)
-    {
-      GPS_Package[GPS_position] = 0;
-      GPS_position = 0;
-      if (ControlCheckSum()) {
-        if (GPS_Parse_DateTime()) SyncWithGPS();
-      }
-
-    }
-  }
-}
-
-bool GPS_Parse_DateTime()
-{
-  bool GPSsignal = false;
-  if (!((GPS_Package[0]   == '$')
-        && (GPS_Package[3] == 'R')
-        && (GPS_Package[4] == 'M')
-        && (GPS_Package[5] == 'C'))) {
-    return false;
-  }
-  else
-  {
-    // Serial.println("RMC!!!");
-  }
-  //Serial.print("hh: ");
-  int hh = (GPS_Package[7] - 48) * 10 + GPS_Package[8] - 48;
-  //Serial.println(hh);
-  int mm = (GPS_Package[9] - 48) * 10 + GPS_Package[10] - 48;
-  //Serial.print("mm: ");
-  //Serial.println(mm);
-  int ss = (GPS_Package[11] - 48) * 10 + GPS_Package[12] - 48;
-  //Serial.print("ss: ");
-  //Serial.println(ss);
-
-  byte GPSDatePos = 0;
-  int CommasCounter = 0;
-  for (int i = 12; i < GPS_BUFFER_LENGTH ; i++)
-  {
-    if (GPS_Package[i] == ',')
-    {
-      CommasCounter++;
-      if (CommasCounter == 8)
-      {
-        GPSDatePos = i + 1;
-        break;
-      }
-    }
-  }
-  //Serial.print("dd: ");
-  int dd = (GPS_Package[GPSDatePos] - 48) * 10 + GPS_Package[GPSDatePos + 1] - 48;
-  //Serial.println(dd);
-  int MM = (GPS_Package[GPSDatePos + 2] - 48) * 10 + GPS_Package[GPSDatePos + 3] - 48;
-  //Serial.print("MM: ");
-  //Serial.println(MM);
-  int yyyy = 2000 + (GPS_Package[GPSDatePos + 4] - 48) * 10 + GPS_Package[GPSDatePos + 5] - 48;
-  //Serial.print("yyyy: ");
-  //Serial.println(yyyy);
-  //if ((hh<0) || (mm<0) || (ss<0) || (dd<0) || (MM<0) || (yyyy<0)) return false;
-  if ( //!inRange( yyyy, 2018, 2038 ) ||
-    !inRange( MM, 1, 12 ) ||
-    !inRange( dd, 1, 31 ) ||
-    !inRange( hh, 0, 23 ) ||
-    !inRange( mm, 0, 59 ) ||
-    !inRange( ss, 0, 59 ) ) return false;
-
-  if (yyyy < 2022) //fixing GPS rollover bug
-  {
-    tmElements_t tmpTmElemtns;
-    tmpTmElemtns.Second = ss;
-    tmpTmElemtns.Minute = mm;
-    tmpTmElemtns.Hour = hh;
-    tmpTmElemtns.Day = dd;
-    tmpTmElemtns.Month = MM;
-    tmpTmElemtns.Year = yyyy - 1970; //offset from 1970
-
-    time_t tmpTime_t;
-    tmpTime_t = makeTime(tmpTmElemtns);
-    //Serial.print("time_t=");
-    //Serial.println(tmpTime_t);
-    tmpTime_t = tmpTime_t + 619315200; // seconds in 1024 weeks = 1024*7*24*3600
-    //Serial.print("new time_t=");
-    //Serial.println(tmpTime_t);
-    breakTime(tmpTime_t, tmpTmElemtns);
-    /*Serial.print("new year=");
-      Serial.println(1970 + tmpTmElemtns.Year);
-      Serial.print("new month=");
-      Serial.println(tmpTmElemtns.Month);
-      Serial.print("new day=");
-      Serial.println(tmpTmElemtns.Day);*/
-    yyyy = 1970 + tmpTmElemtns.Year;
-    MM = tmpTmElemtns.Month;
-    dd = tmpTmElemtns.Day;
-  }
-
-  if (!inRange( yyyy, 2018, 2038 )) return false;
-
-  GPS_Date_Time.GPS_hours = hh;
-  GPS_Date_Time.GPS_minutes = mm;
-  GPS_Date_Time.GPS_seconds = ss;
-  GPS_Date_Time.GPS_day = dd;
-  GPS_Date_Time.GPS_mounth = MM;
-  GPS_Date_Time.GPS_year = yyyy;
-  GPS_Date_Time.GPS_Data_Parsed_time = millis();
-  //Serial.println("Precision TIME HAS BEEN ACCURED!!!!!!!!!");
-  //GPS_Package[0]=0x0A;
-  return 1;
-}
-
-uint8_t ControlCheckSum()
-{
-  uint8_t  CheckSum = 0, MessageCheckSum = 0;   // check sum
-  uint16_t i = 1;                // 1 sybol left from '$'
-
-  while (GPS_Package[i] != '*')
-  {
-    CheckSum ^= GPS_Package[i];
-    if (++i == GPS_BUFFER_LENGTH) {
-      //Serial.println(F("End of the line not found"));  // end of line not found
-      return 0;
-    }
-  }
-
-  if (GPS_Package[++i] > 0x40) MessageCheckSum = (GPS_Package[i] - 0x37) << 4; // ASCII codes to DEC convertation
-  else                  MessageCheckSum = (GPS_Package[i] - 0x30) << 4;
-  if (GPS_Package[++i] > 0x40) MessageCheckSum += (GPS_Package[i] - 0x37);
-  else                  MessageCheckSum += (GPS_Package[i] - 0x30);
-
-  if (MessageCheckSum != CheckSum) {
-    //Serial.println(F("wrong checksum"));  // wrong checksum
-    return 0;
-  }
-  //Serial.println("Checksum is ok");
-  return 1; // all ok!
-}
-
-boolean inRange( int no, int low, int high )
-{
-  if ( no < low || no > high )
-  {
-    Serial.println(F("Date or Time not in range"));
-    //Serial.println(String(no) + ":" + String (low) + "-" + String(high));
-    return false;
-  }
-  return true;
-}
 
 void WiFiSetup()
 {
