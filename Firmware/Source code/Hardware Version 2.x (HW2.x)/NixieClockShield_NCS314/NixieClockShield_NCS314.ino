@@ -1,7 +1,9 @@
-const String FirmwareVersion = "019800";
+const String FirmwareVersion = "019900";
 const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 //Format                _X.XXX_
 //NIXIE CLOCK SHIELD NCS314 v 2.x by GRA & AFCH (fominalec@gmail.com)
+//2.00 29.06.2025
+//NTP support for ESP8266 for Hailege Mega R3 ESP8266 board
 //1.98 07.09.2023
 //Night Mode(start)
 //1.97 05.09.2023
@@ -81,126 +83,21 @@ const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 #include <EEPROM.h>
 #include "doIndication314_HW2.x.h"
 #include <OneWire.h>
-//IR remote control /////////// START /////////////////////////////
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#include <WiFiEsp.h>
+#include <WiFiEspUdp.h>
+#include <NTPClient.h>
+#include <time.h>
+#include <Timezone.h>
 
-#define GPS_SYNC_INTERVAL 1800000 // in milliseconds
-//#define GPS_SYNC_INTERVAL 180000 //3 minutes
-unsigned long Last_Time_GPS_Sync = 0;
-//bool GPS_Sync_Flag = false;
-//uint32_t GPS_Sync_Interval=120000; // 2 minutes
-uint32_t GPS_Sync_Interval = 60000; // first try = 1 minute
-uint32_t MillsNow = 0;
-#define TIME_TO_TRY 60000 //1 minute
-bool AttMsgWasShowed = false;
+// Rename wifi_ntp_secrets.h.template to wifi_ntp_secrets.h and change values
+#include "wifi_ntp_secrets.h"
 
-#define GPS_BUFFER_LENGTH 83
-
-char GPS_Package[GPS_BUFFER_LENGTH];
-byte GPS_position = 0;
-
-struct GPS_DATE_TIME
-{
-  byte GPS_hours;
-  byte GPS_minutes;
-  byte GPS_seconds;
-  byte GPS_day;
-  byte GPS_mounth;
-  int GPS_year;
-  bool GPS_Valid_Data = false;
-  unsigned long GPS_Data_Parsed_time;
-};
-
-GPS_DATE_TIME GPS_Date_Time;
-
-#include <IRremote.h>
-int RECV_PIN = 4;
-IRrecv irrecv(RECV_PIN);
-decode_results IRresults;
-// buttons codes for remote controller Sony RM-X151
-#define IR_BUTTON_UP_CODE 0x6621
-#define IR_BUTTON_DOWN_CODE 0x2621
-#define IR_BUTTON_MODE_CODE 0x7121
-
-class IRButtonState
-{
-  public:
-    int PAUSE_BETWEEN_PACKETS = 50;
-    int PACKETS_QTY_IN_LONG_PRESS = 18;
-
-  private:
-    bool Flag = 0;
-    byte CNT_packets = 0;
-    unsigned long lastPacketTime = 0;
-    bool START_TIMER = false;
-    int _buttonCode;
-
-  public: IRButtonState::IRButtonState(int buttonCode)
-    {
-      _buttonCode = buttonCode;
-    }
-
-  public: int IRButtonState::checkButtonState(int receivedCode)
-    {
-      if (((millis() - lastPacketTime) > PAUSE_BETWEEN_PACKETS) && (START_TIMER == true))
-      {
-        START_TIMER = false;
-        if (CNT_packets >= 2) {
-          Flag = 0;
-          CNT_packets = 0;
-          START_TIMER = false;
-          return 1;
-        }
-        else {
-          Flag = 0;
-          CNT_packets = 0;
-          return 0;
-        }
-      }
-      else
-      {
-        if (receivedCode == _buttonCode) {
-          Flag = 1;
-        }
-        else
-        {
-          if (!(Flag == 1)) {
-            return 0;
-          }
-          else
-          {
-            if (!(receivedCode == 0xFFFFFFFF)) {
-              return 0;
-            }
-          }
-        }
-        CNT_packets++;
-        lastPacketTime = millis();
-        START_TIMER = true;
-        if (CNT_packets >= PACKETS_QTY_IN_LONG_PRESS) {
-          Flag = 0;
-          CNT_packets = 0;
-          START_TIMER = false;
-          return -1;
-        }
-        else {
-          return 0;
-        }
-      }
-    }
-};
-
-IRButtonState IRModeButton(IR_BUTTON_MODE_CODE);
-IRButtonState IRUpButton(IR_BUTTON_UP_CODE);
-IRButtonState IRDownButton(IR_BUTTON_DOWN_CODE);
-#endif
-
+bool initialBootDone = false;
+unsigned long previousMillis_1 = 0, previousMillis_2 = 0;
 
 int ModeButtonState = 0;
 int UpButtonState = 0;
 int DownButtonState = 0;
-
-//IR remote control /////////// START /////////////////////////////
 
 boolean UD, LD; // DOTS control;
 
@@ -356,13 +253,21 @@ ClickButton upButton(pinUp, LOW, CLICKBTN_PULLUP);
 ClickButton downButton(pinDown, LOW, CLICKBTN_PULLUP);
 ///////////////////
 
+// For more song
+// => http://www.fodor.sk/spectrum/rttl.htm
+// => https://1j01.github.io/rtttl.js/#007
 Tone tone1;
 #define isdigit(n) (n >= '0' && n <= '9')
 //char *song = "MissionImp:d=16,o=6,b=95:32d,32d#,32d,32d#,32d,32d#,32d,32d#,32d,32d,32d#,32e,32f,32f#,32g,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,g,8p,g,8p,a#,p,c7,p,g,8p,g,8p,f,p,f#,p,a#,g,2d,32p,a#,g,2c#,32p,a#,g,2c,a#5,8c,2p,32p,a#5,g5,2f#,32p,a#5,g5,2f,32p,a#5,g5,2e,d#,8d";
-char *song = "PinkPanther:d=4,o=5,b=160:8d#,8e,2p,8f#,8g,2p,8d#,8e,16p,8f#,8g,16p,8c6,8b,16p,8d#,8e,16p,8b,2a#,2p,16a,16g,16e,16d,2e";
+//char *song = "PinkPanther:d=4,o=5,b=160:8d#,8e,2p,8f#,8g,2p,8d#,8e,16p,8f#,8g,16p,8c6,8b,16p,8d#,8e,16p,8b,2a#,2p,16a,16g,16e,16d,2e";
 //char *song="VanessaMae:d=4,o=6,b=70:32c7,32b,16c7,32g,32p,32g,32p,32d#,32p,32d#,32p,32c,32p,32c,32p,32c7,32b,16c7,32g#,32p,32g#,32p,32f,32p,16f,32c,32p,32c,32p,32c7,32b,16c7,32g,32p,32g,32p,32d#,32p,32d#,32p,32c,32p,32c,32p,32g,32f,32d#,32d,32c,32d,32d#,32c,32d#,32f,16g,8p,16d7,32c7,32d7,32a#,32d7,32a,32d7,32g,32d7,32d7,32p,32d7,32p,32d7,32p,16d7,32c7,32d7,32a#,32d7,32a,32d7,32g,32d7,32d7,32p,32d7,32p,32d7,32p,32g,32f,32d#,32d,32c,32d,32d#,32c,32d#,32f,16c";
 //char *song="DasBoot:d=4,o=5,b=100:d#.4,8d4,8c4,8d4,8d#4,8g4,a#.4,8a4,8g4,8a4,8a#4,8d,2f.,p,f.4,8e4,8d4,8e4,8f4,8a4,c.,8b4,8a4,8b4,8c,8e,2g.,2p";
 //char *song="Scatman:d=4,o=5,b=200:8b,16b,32p,8b,16b,32p,8b,2d6,16p,16c#.6,16p.,8d6,16p,16c#6,8b,16p,8f#,2p.,16c#6,8p,16d.6,16p.,16c#6,16b,8p,8f#,2p,32p,2d6,16p,16c#6,8p,16d.6,16p.,16c#6,16a.,16p.,8e,2p.,16c#6,8p,16d.6,16p.,16c#6,16b,8p,8b,16b,32p,8b,16b,32p,8b,2d6,16p,16c#.6,16p.,8d6,16p,16c#6,8b,16p,8f#,2p.,16c#6,8p,16d.6,16p.,16c#6,16b,8p,8f#,2p,32p,2d6,16p,16c#6,8p,16d.6,16p.,16c#6,16a.,16p.,8e,2p.,16c#6,8p,16d.6,16p.,16c#6,16a,8p,8e,2p,32p,16f#.6,16p.,16b.,16p.";
+char *song="FinalCountdown:d=4,o=5,b=125:p,8p,16b,16a,b,e,p,8p,16c6,16b,8c6,8b,a,p,8p,16c6,16b,c6,e,p,8p,16a,16g,8a,8g,8f#,8a,g.,16f#,16g,a.,16g,16a,8b,8a,8g,8f#,e,c6,2b.,16b,16c6,16b,16a,1b";
+//char *song="Indiana:d=4,o=5,b=250:e,8p,8f,8g,8p,1c6,8p.,d,8p,8e,1f,p.,g,8p,8a,8b,8p,1f6,p,a,8p,8b,2c6,2d6,2e6,e,8p,8f,8g,8p,1c6,p,d6,8p,8e6,1f.6,g,8p,8g,e.6,8p,d6,8p,8g,e.6,8p,d6,8p,8g,f.6,8p,e6,8p,8d6,2c6";
+//char *song="Metallica:d=4,o=6,b=125:e5,g,b,e7,b,g,e5,g,b,e7,b,g,2e5,b,2b,2b,32p,b,c,b,a,b,a,e,2e,2e,16p,c,e,e,f_,e,e,16p,e,f_,2g,g,g,2a,a,a,2e,2g,2b,2e7,2b,2g,2e";
+//char *song="MetallicaEnterSandman:d=4,o=6,b=125:a5,8a,8c7,8d_,d,8a,a5,8a,8c7,8d_,d,8a,a5,8a,8c7,8d_,d,8a,a5,8a,8c7,8d_,d,8a,a5";
+//char *song="AdamsFamily:o=5,d=8,b=160,b=160:c,4f,a,4f,c,4b4,2g,f,4e,g,4e,g4,4c,2f,c,4f,a,4f,c,4b4,2g,f,4e,c,4d,e,1f,c,d,e,f,1p,d,e,f#,g,1p,d,e,f#,g,4p,d,e,f#,g,4p,c,d,e,f";
 //char *song="Popcorn:d=4,o=5,b=160:8c6,8a#,8c6,8g,8d#,8g,c,8c6,8a#,8c6,8g,8d#,8g,c,8c6,8d6,8d#6,16c6,8d#6,16c6,8d#6,8d6,16a#,8d6,16a#,8d6,8c6,8a#,8g,8a#,c6";
 //char *song="WeWishYou:d=4,o=5,b=200:d,g,8g,8a,8g,8f#,e,e,e,a,8a,8b,8a,8g,f#,d,d,b,8b,8c6,8b,8a,g,e,d,e,a,f#,2g,d,g,8g,8a,8g,8f#,e,e,e,a,8a,8b,8a,8g,f#,d,d,b,8b,8c6,8b,8a,g,e,d,e,a,f#,1g,d,g,g,g,2f#,f#,g,f#,e,2d,a,b,8a,8a,8g,8g,d6,d,d,e,a,f#,2g";
 #define OCTAVE_OFFSET 0
@@ -401,6 +306,28 @@ long modesChangePeriod = timeModePeriod;
 
 extern const int LEDsDelay;
 
+/*  Wireless settings
+ *
+*/
+
+char ssid[] = SECRET_SSID;
+char pass[] = SECRET_PASS;
+
+WiFiEspUDP ntpUDP;
+//WiFiEspServer server(80);  // Set web server port
+
+// You can specify the time server pool and the offset (in seconds, can be changed later with setTimeOffset()).
+//Additionally you can specify the update interval (in milliseconds, can be changed using setUpdateInterval()).
+NTPClient timeClient(ntpUDP, NTPSERVER);
+bool timeClientUpdate = false;
+unsigned long epoch = 0;
+String tempRTCTime = "", tempCLKTime = "", tempNTPTime = "";
+TimeChangeRule DST = TZ_DST;
+TimeChangeRule DEF = TZ_DEF;
+Timezone myTZ(DST, DEF);
+TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
+String DSTEnabled = "Unknown";
+
 /*******************************************************************************************************
   Init Programm
 *******************************************************************************************************/
@@ -413,6 +340,8 @@ void setup()
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
   Serial1.begin(9600);
   digitalWrite(19, HIGH);
+  WiFiSetup();
+  //server.begin();
 #endif
 
   if (EEPROM.read(HourFormatEEPROMAddress) != 12) value[hModeValueIndex] = 24; else value[hModeValueIndex] = 12;
@@ -506,8 +435,8 @@ void setup()
   setTime(RTC_hours, RTC_minutes, RTC_seconds, RTC_day, RTC_month, RTC_year);
 
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-  irrecv.blink13(false);
-  irrecv.enableIRIn(); // Start the receiver
+  timeClient.begin();
+  timeClient.setTimeOffset(HoursOffsetIndex[value] * 3600);
 #endif
 
 }
@@ -526,6 +455,96 @@ unsigned long prevTime4FireWorks = 0; //time of last RGB changed
 ***************************************************************************************************************/
 void loop() 
 {
+
+  // // Wifi client
+  // WiFiEspClient client = server.available();
+  // if(client)
+  // {
+  //   IPAddress ip = client.remoteIP();
+  //   Serial.println("New client ");
+  //   Serial.println(ip);
+    
+  //   while(client.connected())
+  //   {
+  //     if (client.available())
+  //     {
+  //       String line = client.readStringUntil('\n');
+  //       line.trim();
+  //       Serial.println(line);
+
+  //       if (line.length() == 0)
+  //       {
+  //         client.println("HTTP/1.1 200 OK");
+  //         client.println("Content-Type: text/html");
+  //         client.println("Connection: close");
+  //         client.println("");
+          
+  //         String html = "";
+
+  //         html += "<!DOCTYPE html>";
+  //         html += "<html lang='en'>";
+
+  //           html += "<head>";
+  //             html += "<meta charset='utf-8'>";
+  //             html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+  //             html += "<title>Nixie Clock</title>";
+  //             html += "<style>";
+  //               html += "table {font-family: arial, sans-serif; border-collapse: collapse; width: 100%;}";
+  //               html += "td, th {border: 1px solid #dddddd; text-align: left; padding: 10px;}";
+  //               html += "tr:nth-child(even) {background-color: #dddddd;}";
+  //             html += "</style>";
+  //           html += "</head>";
+
+  //           html += "<body>";
+
+  //             html += "<h1 style='text-align: center;'>Current Time Readings</h1>";
+  //             html += "<table>";
+  //               html += "<tr>";
+  //                 html += "<th>Fetched UNIX Time</th>";
+  //                 html += "<th><a target='_blank' href='https://www.epochconverter.com/?q=" + String(epoch) + "'>" + String(epoch) + "</a></th>";
+  //               html += "</tr>";
+
+  //               html += "<tr>";
+  //                 html += "<th>Fetched NTP Time (UTC)</th>";
+  //                 html += "<th>" + String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds()) + "</th>";
+  //               html += "</tr>";
+
+  //               html += "<tr>";
+  //                 html += "<th>Current Nixie Time (TZ)</th>";
+  //                 html += "<th>" + String(hour()) + ":" + String(minute()) + ":" + String(second()) + "</th>";
+  //               html += "</tr>";
+
+  //               html += "<tr>";
+  //                 html += "<th>Stored RTC Time (TZ)</th>";
+  //                 html += "<th>" + String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds) + "</th>";
+  //               html += "</tr>";
+                
+  //               html += "<tr>";
+  //                 html += "<th>Hours Offset Index</th>";
+  //                 html += "<th>" + String(HoursOffsetIndex[value]) + "</th>";
+  //               html += "</tr>";
+
+  //               html += "<tr>";
+  //                 html += "<th>Daylight Saving Time (DST) Enabled?</th>";
+  //                 html += "<th>" + String(DSTEnabled) + "</th>";
+  //               html += "</tr>";
+
+  //             html += "</table>";
+
+  //             html += "<p style='text-align: center;'>Firmware = " + String(FirmwareVersion.substring(1, 2)) + "." + String(FirmwareVersion.substring(2, 5)) + "</p>";
+
+  //           html += "</body>";
+  //         html += "</html>";
+
+  //         client.println(html);
+  //         client.flush();
+  //         break;
+  //       }
+  //     }
+  //   }
+  //   client.stop();
+  // }
+
   CheckNightMode();
   if (((millis() % 10000) == 0) && (RTC_present)) //synchronize with RTC every 10 seconds
   {
@@ -536,46 +555,48 @@ void loop()
 
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 
-  MillsNow = millis();
-  if ((MillsNow - Last_Time_GPS_Sync) > GPS_Sync_Interval)
+  // Update NTP upon boot
+  if (!initialBootDone)
   {
-    //GPS_Sync_Interval = GPS_SYNC_INTERVAL; // <----!
-    //GPS_Sync_Flag = 0;
-    if (AttMsgWasShowed == false)
-    {
-      Serial.println(F("Attempt to sync with GPS."));
-      AttMsgWasShowed = true;
+    initialBootDone = true;
+    
+    Serial.println(F("\n"));
+    Serial.println(F("Attempting to sync with NTP after boot"));
+
+    //timeClient.forceUpdate();
+    timeClientUpdate = timeClient.update();
+    Serial.println((String)"Update: " + timeClientUpdate);
+    
+    if(timeClient.isTimeSet() && timeClientUpdate) {
+      setNTPTime();
+      Serial.println(F("NTP updated after boot"));
     }
-    GetDataFromSerial1();
-    //SyncWithGPS();
+    else {
+      Serial.println(F("No NTP update after boot"));
+    }
   }
-  if ((MillsNow - Last_Time_GPS_Sync) > GPS_Sync_Interval + TIME_TO_TRY)
+
+  //synchronize with NTP every 5 minutes (300UL * 1000UL)
+  else if ((millis() - previousMillis_2) >= (300UL * 1000UL))
   {
-    Last_Time_GPS_Sync = MillsNow; //if it is not possible to synchronize within the allotted time TIME_TO_TRY, then we postpone attempts to the next time interval.
-    //GPS_Sync_Flag = 1;
-    //GPS_Sync_Interval = GPS_SYNC_INTERVAL;
-    Serial.println(F("All attempts were unsuccessful."));
-    AttMsgWasShowed = false;
+    // Reset previousMillis to current millis
+    previousMillis_2 = millis();
+
+    Serial.println(F("\n"));
+    Serial.println(F("Attempting to sync with NTP"));
+
+    //timeClient.forceUpdate();
+    timeClientUpdate = timeClient.update();
+    Serial.println((String)"Update: " + timeClientUpdate);
+
+    if(timeClient.isTimeSet() && timeClientUpdate) {
+      setNTPTime();
+      Serial.println(F("NTP updated"));
+    }
+    else {
+      Serial.println(F("No NTP update"));
+    }
   }
-  //if (GPS_Sync_Flag == 0) GetDataFromSerial1(); //GPSCheckValidity();
-
-  IRresults.value = 0;
-  if (irrecv.decode(&IRresults)) {
-    Serial.println(IRresults.value, HEX);
-    irrecv.resume(); // Receive the next value
-  }
-
-  ModeButtonState = IRModeButton.checkButtonState(IRresults.value);
-  if (ModeButtonState == 1) Serial.println("Mode short");
-  if (ModeButtonState == -1) Serial.println("Mode long....");
-
-  UpButtonState = IRUpButton.checkButtonState(IRresults.value);
-  if (UpButtonState == 1) Serial.println("Up short");
-  if (UpButtonState == -1) Serial.println("Up long....");
-
-  DownButtonState = IRDownButton.checkButtonState(IRresults.value);
-  if (DownButtonState == 1) Serial.println("Down short");
-  if (DownButtonState == -1) Serial.println("Down long....");
 #else
   ModeButtonState = 0;
   UpButtonState = 0;
@@ -944,6 +965,8 @@ void doTest()
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
   if (Serial1.available() > 10) Serial.println(F("GPS detected"));
   else Serial.println(F("GPS NOT detected!"));
+  // if (Serial3.available() > 10) Serial.println(F("WIFI module detected"));
+  // else Serial.println(F("WiFi module NOT detected!"));
 #endif
 #ifdef tubes8
   String testStringArray[11] = {"00000000", "11111111", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888", "99999999", ""};
@@ -996,8 +1019,14 @@ void doDotBlink()
 {
   //dotPattern = B11000000; return; //always on
   //dotPattern = B00000000; return; //always off
-  if (second() % 2 == 0) dotPattern = B11000000;
-  else dotPattern = B00000000;
+  //if (second() % 2 == 0) dotPattern = B11000000;
+  //else dotPattern = B00000000;
+  if (millis() % 1000 < 200) dotPattern = B11000000;
+  else {
+    if (millis() % 1000 < 400) dotPattern = B01000000;
+    else dotPattern = B00000000;
+  }
+    
 }
 
 void setRTCDateTime(byte h, byte m, byte s, byte d, byte mon, byte y, byte w)
@@ -1575,183 +1604,126 @@ void ExitFromNightMode()
 
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 
-void SyncWithGPS()
+void WiFiSetup()
 {
-  if ((millis() - GPS_Date_Time.GPS_Data_Parsed_time) > 3000) {
-    //Serial.println(F("Parsed data to old"));
-    return;
+  Serial3.begin(115200);
+  WiFi.init(&Serial3);    // initialize ESP module
+    
+  Serial.println(F("\n"));
+  Serial.println((String)"Connecting to = " + ssid);
+  
+  WiFi.begin(ssid, pass);
+  
+  // Set up Wifi connection
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+    // wifiSetupLoop++;
+    // // If more than 30 loop, break
+    // if (wifiSetupLoop == 30) break;
+    // // If higher than 10 loop then check for serial (allow temp for serial3 to be up and test it)
+    // if (wifiSetupLoop > 10) {
+    //   if (Serial3.available() <= 10) {
+    //     Serial.println(F("WiFi module NOT detected!"));
+    //     break;
+    //   }
+    // }
   }
-  Serial.println(F("Updating time from GPS..."));
-  Serial.println(GPS_Date_Time.GPS_hours);
-  Serial.println(GPS_Date_Time.GPS_minutes);
-  Serial.println(GPS_Date_Time.GPS_seconds);
 
-  setTime(GPS_Date_Time.GPS_hours, GPS_Date_Time.GPS_minutes, GPS_Date_Time.GPS_seconds, GPS_Date_Time.GPS_day, GPS_Date_Time.GPS_mounth, GPS_Date_Time.GPS_year % 1000);
-  adjustTime((long)value[HoursOffsetIndex] * 3600);
-  setRTCDateTime(hour(), minute(), second(), day(), month(), year() % 1000, 1);
-  Last_Time_GPS_Sync = MillsNow;
-  GPS_Sync_Interval = GPS_SYNC_INTERVAL;
-  AttMsgWasShowed = false;
+  // Wifi is connected
+  if(WiFi.status() == WL_CONNECTED)
+  {  
+    Serial.println(F("\n"));
+
+    IPAddress ip = WiFi.localIP();
+    Serial.print(F("IP Address: "));
+    Serial.println(ip);
+  
+    Serial.println((String)"Signal strength (RSSI) = " + WiFi.RSSI() + " dBm");
+    Serial.println((String)"ESP8266 Firmware = " + WiFi.firmwareVersion());
+    Serial.println(F("\n"));
+  }
 }
 
-void GetDataFromSerial1()
-{
-  if (Serial1.available()) {     // If anything comes in Serial1 (pins 0 & 1)
-    byte GPS_incoming_byte;
-    GPS_incoming_byte = Serial1.read();
-    //Serial.write(GPS_incoming_byte);
-    GPS_Package[GPS_position] = GPS_incoming_byte;
-    GPS_position++;
-    if (GPS_position == GPS_BUFFER_LENGTH - 1)
-    {
-      GPS_position = 0;
-      // Serial.println("more then BUFFER_LENGTH!!!!");
-    }
-    if (GPS_incoming_byte == 0x0A)
-    {
-      GPS_Package[GPS_position] = 0;
-      GPS_position = 0;
-      if (ControlCheckSum()) {
-        if (GPS_Parse_DateTime()) SyncWithGPS();
-      }
+// NTP stuff here
+void setNTPTime() {
 
+  // fetch NTP time in Unix time (epoch timestamp)
+  epoch = timeClient.getEpochTime();
+
+  // Testing if epoch is a correct value
+  if (synchronizeNTP(epoch)) {
+  //if ((epoch < 2085978000) || (epoch > 2085979000)) {
+
+    // Show fetched NTP time
+    Serial.println("UNIX epoch time = " + String(epoch));
+    Serial.println("Formatted time = " + String(timeClient.getFormattedTime()));
+    // Set the clock to the fetched NTP time + time offset in Unix time (epoch timestamp)
+    //setTime(epoch);
+    
+    // Update time according to timezone
+    myTZ.setRules(DST, DEF);
+    setTime(myTZ.toLocal(epoch, &tcr));
+
+    if(myTZ.locIsDST(epoch)) {
+      DSTEnabled = "Yes";
     }
+    else {
+      DSTEnabled = "No";
+    }
+    
+    // Logic to compare RTC/NTP/CLK drift and update if needed, prevents excessive RTC writes
+    tempRTCTime = String(RTC_hours) + ":" + String(RTC_minutes) + ":" + String(RTC_seconds);
+    tempNTPTime = String(timeClient.getHours()) + ":" + String(timeClient.getMinutes()) + ":" + String(timeClient.getSeconds());
+    tempCLKTime = String(hour()) + ":" + String(minute()) + ":" + String(second());
+
+    Serial.println("Current RTC time = " + tempRTCTime);
+    Serial.println("Current NTP time = " + tempNTPTime);
+    Serial.println("Fetched CLK time = " + tempCLKTime);
+
+    if(RTC_hours == hour() && RTC_minutes == minute() && RTC_seconds == second()) {
+      Serial.println(F("Time not synced with RTC, since RTC and current time (CLK) are the same"));
+    }
+    else {
+      setRTCDateTime(hour(), minute(), second(), day(), month(), year() % 1000, weekday());
+      Serial.println(F("Updated current RTC time to current clock time"));
+    }
+
   }
+  else {
+     Serial.println("Ignoring epoch time = " + String(epoch));
+  }
+
 }
 
-bool GPS_Parse_DateTime()
-{
-  bool GPSsignal = false;
-  if (!((GPS_Package[0]   == '$')
-        && (GPS_Package[3] == 'R')
-        && (GPS_Package[4] == 'M')
-        && (GPS_Package[5] == 'C'))) {
-    return false;
-  }
-  else
-  {
-    // Serial.println("RMC!!!");
-  }
-  //Serial.print("hh: ");
-  int hh = (GPS_Package[7] - 48) * 10 + GPS_Package[8] - 48;
-  //Serial.println(hh);
-  int mm = (GPS_Package[9] - 48) * 10 + GPS_Package[10] - 48;
-  //Serial.print("mm: ");
-  //Serial.println(mm);
-  int ss = (GPS_Package[11] - 48) * 10 + GPS_Package[12] - 48;
-  //Serial.print("ss: ");
-  //Serial.println(ss);
+// Check weither we should synchronize the provided NTP time compare to local time.
+// If too much of a difference between the two, we won't synchronize.
+// 
+/**
+ * ntpTime NTP time in second from Jan 1 1970.
+ * return true if synchronize is possible, false otherwise.
+ */
+bool synchronizeNTP(unsigned long ntpTime) {
 
-  byte GPSDatePos = 0;
-  int CommasCounter = 0;
-  for (int i = 12; i < GPS_BUFFER_LENGTH ; i++)
-  {
-    if (GPS_Package[i] == ',')
-    {
-      CommasCounter++;
-      if (CommasCounter == 8)
-      {
-        GPSDatePos = i + 1;
-        break;
-      }
-    }
-  }
-  //Serial.print("dd: ");
-  int dd = (GPS_Package[GPSDatePos] - 48) * 10 + GPS_Package[GPSDatePos + 1] - 48;
-  //Serial.println(dd);
-  int MM = (GPS_Package[GPSDatePos + 2] - 48) * 10 + GPS_Package[GPSDatePos + 3] - 48;
-  //Serial.print("MM: ");
-  //Serial.println(MM);
-  int yyyy = 2000 + (GPS_Package[GPSDatePos + 4] - 48) * 10 + GPS_Package[GPSDatePos + 5] - 48;
-  //Serial.print("yyyy: ");
-  //Serial.println(yyyy);
-  //if ((hh<0) || (mm<0) || (ss<0) || (dd<0) || (MM<0) || (yyyy<0)) return false;
-  if ( //!inRange( yyyy, 2018, 2038 ) ||
-    !inRange( MM, 1, 12 ) ||
-    !inRange( dd, 1, 31 ) ||
-    !inRange( hh, 0, 23 ) ||
-    !inRange( mm, 0, 59 ) ||
-    !inRange( ss, 0, 59 ) ) return false;
+  Serial.println("NTP Synchronize test");
 
-  if (yyyy < 2022) //fixing GPS rollover bug
-  {
-    tmElements_t tmpTmElemtns;
-    tmpTmElemtns.Second = ss;
-    tmpTmElemtns.Minute = mm;
-    tmpTmElemtns.Hour = hh;
-    tmpTmElemtns.Day = dd;
-    tmpTmElemtns.Month = MM;
-    tmpTmElemtns.Year = yyyy - 1970; //offset from 1970
+  // Current time
+  time_t currentTime = now();
 
-    time_t tmpTime_t;
-    tmpTime_t = makeTime(tmpTmElemtns);
-    //Serial.print("time_t=");
-    //Serial.println(tmpTime_t);
-    tmpTime_t = tmpTime_t + 619315200; // seconds in 1024 weeks = 1024*7*24*3600
-    //Serial.print("new time_t=");
-    //Serial.println(tmpTime_t);
-    breakTime(tmpTime_t, tmpTmElemtns);
-    /*Serial.print("new year=");
-      Serial.println(1970 + tmpTmElemtns.Year);
-      Serial.print("new month=");
-      Serial.println(tmpTmElemtns.Month);
-      Serial.print("new day=");
-      Serial.println(tmpTmElemtns.Day);*/
-    yyyy = 1970 + tmpTmElemtns.Year;
-    MM = tmpTmElemtns.Month;
-    dd = tmpTmElemtns.Day;
-  }
+  // Absolut seconds between current time and NTP time
+  long secondsBetween = currentTime - ntpTime;
+  long absolutSecondsBetween = abs(secondsBetween);
 
-  if (!inRange( yyyy, 2018, 2038 )) return false;
+  // 12 hours in seconds (12hrs * 60mins * 60sec = 43200sec)
+  long threshold = 12UL * 60UL * 60UL;
 
-  GPS_Date_Time.GPS_hours = hh;
-  GPS_Date_Time.GPS_minutes = mm;
-  GPS_Date_Time.GPS_seconds = ss;
-  GPS_Date_Time.GPS_day = dd;
-  GPS_Date_Time.GPS_mounth = MM;
-  GPS_Date_Time.GPS_year = yyyy;
-  GPS_Date_Time.GPS_Data_Parsed_time = millis();
-  //Serial.println("Precision TIME HAS BEEN ACCURED!!!!!!!!!");
-  //GPS_Package[0]=0x0A;
-  return 1;
-}
+  Serial.println("There is currently a " + String(absolutSecondsBetween) + "sec gap");
+  Serial.println("Threshold for synchronizing is " + String(threshold));
 
-uint8_t ControlCheckSum()
-{
-  uint8_t  CheckSum = 0, MessageCheckSum = 0;   // check sum
-  uint16_t i = 1;                // 1 sybol left from '$'
+  if (absolutSecondsBetween > threshold) return false;
+  else return true;
 
-  while (GPS_Package[i] != '*')
-  {
-    CheckSum ^= GPS_Package[i];
-    if (++i == GPS_BUFFER_LENGTH) {
-      //Serial.println(F("End of the line not found"));  // end of line not found
-      return 0;
-    }
-  }
-
-  if (GPS_Package[++i] > 0x40) MessageCheckSum = (GPS_Package[i] - 0x37) << 4; // ASCII codes to DEC convertation
-  else                  MessageCheckSum = (GPS_Package[i] - 0x30) << 4;
-  if (GPS_Package[++i] > 0x40) MessageCheckSum += (GPS_Package[i] - 0x37);
-  else                  MessageCheckSum += (GPS_Package[i] - 0x30);
-
-  if (MessageCheckSum != CheckSum) {
-    //Serial.println(F("wrong checksum"));  // wrong checksum
-    return 0;
-  }
-  //Serial.println("Checksum is ok");
-  return 1; // all ok!
-}
-
-boolean inRange( int no, int low, int high )
-{
-  if ( no < low || no > high )
-  {
-    Serial.println(F("Date or Time not in range"));
-    //Serial.println(String(no) + ":" + String (low) + "-" + String(high));
-    return false;
-  }
-  return true;
 }
 
 #endif
