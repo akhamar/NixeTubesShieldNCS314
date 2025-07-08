@@ -1650,11 +1650,11 @@ void WiFiSetup()
 void setNTPTime() {
 
   // fetch NTP time in Unix time (epoch timestamp)
-  // Filter bad range => example: 2085978497, 2085978527, 2085978525, 2085978497, ...
   epoch = timeClient.getEpochTime();
 
   // Testing if epoch is a correct value
-  if ((epoch < 2085978000) || (epoch > 2085979000)) {
+  if (synchronizeNTP(epoch)) {
+  //if ((epoch < 2085978000) || (epoch > 2085979000)) {
 
     // Show fetched NTP time
     Serial.println("UNIX epoch time = " + String(epoch));
@@ -1694,6 +1694,35 @@ void setNTPTime() {
   else {
      Serial.println("Ignoring epoch time = " + String(epoch));
   }
+
+}
+
+// Check weither we should synchronize the provided NTP time compare to local time.
+// If too much of a difference between the two, we won't synchronize.
+// 
+/**
+ * ntpTime NTP time in second from Jan 1 1970.
+ * return true if synchronize is possible, false otherwise.
+ */
+bool synchronizeNTP(unsigned long ntpTime) {
+
+  Serial.println("NTP Synchronize test");
+
+  // Current time
+  time_t currentTime = now();
+
+  // Absolut seconds between current time and NTP time
+  long secondsBetween = currentTime - ntpTime;
+  long absolutSecondsBetween = abs(secondsBetween);
+
+  // 12 hours in seconds (12hrs * 60mins * 60sec = 43200sec)
+  long threshold = 12UL * 60UL * 60UL;
+
+  Serial.println("There is currently a " + String(absolutSecondsBetween) + "sec gap");
+  Serial.println("Threshold for synchronizing is " + String(threshold));
+
+  if (absolutSecondsBetween > threshold) return false;
+  else return true;
 
 }
 
