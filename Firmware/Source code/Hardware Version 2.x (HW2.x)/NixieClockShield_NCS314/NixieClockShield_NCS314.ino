@@ -93,7 +93,7 @@ const char HardwareVersion[] PROGMEM = {"NCS314 for HW 2.x HV5122 or HV5222"};
 #include "wifi_ntp_secrets.h"
 
 bool initialBootDone = false;
-unsigned long previousMillis_1 = 0, previousMillis_2 = 0;
+unsigned long previousMillis_1 = 0, previousMillis_2 = 0, previousMillis_wifi = 0, previousMillis_wifi_status = 0;
 
 int ModeButtonState = 0;
 int UpButtonState = 0;
@@ -555,30 +555,62 @@ void loop()
 
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 
-  // Update NTP upon boot
-  if (!initialBootDone)
-  {
+  // Wifi is disconnected
+  if (WiFi.status() != WL_CONNECTED) {
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis_wifi >= (120UL * 1000UL)) { // Try reconnecting every 120 seconds
+      previousMillis_wifi = currentMillis;
+      Serial.println(F("\nWiFi connection lost. Attempting to reconnect..."));
+
+      // Restart WiFi
+      WiFi.reset();
+      WiFi.begin(ssid, pass);
+
+      // restart time client
+      timeClient.end();
+      timeClient.begin();
+    }
+  }
+
+  // Wifi is connected
+  if(WiFi.status() == WL_CONNECTED) {
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis_wifi_status >= (60UL * 1000UL)) {
+      previousMillis_wifi_status = currentMillis;
+      Serial.println(F("\n"));
+
+      IPAddress ip = WiFi.localIP();
+      Serial.print(F("IP Address: "));
+      Serial.println(ip);
+  
+      Serial.println((String)"Signal strength (RSSI) = " + WiFi.RSSI() + " dBm");
+      Serial.println((String)"ESP8266 Firmware = " + WiFi.firmwareVersion());
+      Serial.println(F("\n"));
+    }
+  }
+
+  // Update NTP upon boot or after reconnection
+  if (!initialBootDone) {
     initialBootDone = true;
     
     Serial.println(F("\n"));
-    Serial.println(F("Attempting to sync with NTP after boot"));
-
+    Serial.println(F("Attempting to sync with NTP after boot/reconnect"));
+    
     //timeClient.forceUpdate();
     timeClientUpdate = timeClient.update();
     Serial.println((String)"Update: " + timeClientUpdate);
     
     if(timeClient.isTimeSet() && timeClientUpdate) {
       setNTPTime();
-      Serial.println(F("NTP updated after boot"));
+      Serial.println(F("NTP updated after boot/reconnect"));
     }
     else {
-      Serial.println(F("No NTP update after boot"));
+      Serial.println(F("No NTP update after boot/reconnect"));
     }
   }
 
-  //synchronize with NTP every 5 minutes (300UL * 1000UL)
-  else if ((millis() - previousMillis_2) >= (300UL * 1000UL))
-  {
+  //synchronize with NTP every 20sec (20UL * 1000UL)
+  else if ((millis() - previousMillis_2) >= (20UL * 1000UL)) {
     // Reset previousMillis to current millis
     previousMillis_2 = millis();
 
@@ -1611,39 +1643,8 @@ void WiFiSetup()
     
   Serial.println(F("\n"));
   Serial.println((String)"Connecting to = " + ssid);
-  
+
   WiFi.begin(ssid, pass);
-  
-  // Set up Wifi connection
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-    // wifiSetupLoop++;
-    // // If more than 30 loop, break
-    // if (wifiSetupLoop == 30) break;
-    // // If higher than 10 loop then check for serial (allow temp for serial3 to be up and test it)
-    // if (wifiSetupLoop > 10) {
-    //   if (Serial3.available() <= 10) {
-    //     Serial.println(F("WiFi module NOT detected!"));
-    //     break;
-    //   }
-    // }
-  }
-
-  // Wifi is connected
-  if(WiFi.status() == WL_CONNECTED)
-  {  
-    Serial.println(F("\n"));
-
-    IPAddress ip = WiFi.localIP();
-    Serial.print(F("IP Address: "));
-    Serial.println(ip);
-  
-    Serial.println((String)"Signal strength (RSSI) = " + WiFi.RSSI() + " dBm");
-    Serial.println((String)"ESP8266 Firmware = " + WiFi.firmwareVersion());
-    Serial.println(F("\n"));
-  }
 }
 
 // NTP stuff here
@@ -1711,8 +1712,13 @@ bool synchronizeNTP(unsigned long ntpTime) {
   // Current time
   time_t currentTime = now();
 
+  long secondsBetween = 0;
+  if (currentTime > ntpTime) {
+    secondsBetween = currentTime - ntpTime;
+  } else {
+    secondsBetween = ntpTime - currentTime;
+  }
   // Absolut seconds between current time and NTP time
-  long secondsBetween = currentTime - ntpTime;
   long absolutSecondsBetween = abs(secondsBetween);
 
   // 12 hours in seconds (12hrs * 60mins * 60sec = 43200sec)
